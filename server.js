@@ -14,12 +14,24 @@ app.use("/api/notifications", notificationRoutes);
 
 
 // --- Core Middlewares ---
-// --- Core Middlewares ---
-app.use(cors({
-  origin: ["https://admin.truckinn.app", "https://truckinn.app"],
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: [
+      "https://admin.truckinn.app",
+      "https://www.admin.truckinn.app",
+      "https://truckinn.app",
+      "https://www.truckinn.app"
+    ],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
+
+// handle preflight requests
+app.options("*", cors());
+
+
 app.use(express.json()); // parse JSON bodies
 
 app.use(express.json()); // parse JSON bodies
