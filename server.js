@@ -14,7 +14,14 @@ app.use("/api/notifications", notificationRoutes);
 
 
 // --- Core Middlewares ---
-app.use(cors());
+// --- Core Middlewares ---
+app.use(cors({
+  origin: ["https://admin.truckinn.app", "https://truckinn.app"],
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
+}));
+app.use(express.json()); // parse JSON bodies
+
 app.use(express.json()); // parse JSON bodies
 
 const authRoutes = require("./routes/authRoutes");
