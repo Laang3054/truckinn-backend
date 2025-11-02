@@ -14,12 +14,24 @@ app.use("/api/notifications", notificationRoutes);
 
 
 // --- Core Middlewares ---
-// --- Core Middlewares ---
-app.use(cors({
-  origin: ["https://admin.truckinn.app", "https://truckinn.app"],
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: [
+      "https://admin.truckinn.app",
+      "https://www.admin.truckinn.app",
+      "https://truckinn.app",
+      "https://www.truckinn.app"
+    ],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
+
+// handle preflight requests
+app.options(/.*/, cors());
+
+
 app.use(express.json()); // parse JSON bodies
 
 app.use(express.json()); // parse JSON bodies
@@ -109,24 +121,6 @@ function getLocalIP() {
 const PORT = process.env.PORT || 4000;
 const HOST = getLocalIP();
 
-// ✅ Auto-update UserApp .env with current IP
-const envFile = path.join(__dirname, "../TruckInn/UserApp/.env");
-try {
-  const content = `EXPO_PUBLIC_BASE_URL=http://${HOST}:${PORT}\n`;
-  fs.writeFileSync(envFile, content);
-  console.log("🌍 .env updated for UserApp:", content.trim());
-} catch (err) {
-  console.error("⚠️ Failed to update .env for UserApp:", err.message);
-}
-// ✅ Also update DriverApp .env with same IP
-const driverEnvFile = path.join(__dirname, "../TruckInn/DriverApp/.env");
-try {
-  const content = `EXPO_PUBLIC_BASE_URL=http://${HOST}:${PORT}\n`;
-  fs.writeFileSync(driverEnvFile, content);
-  console.log("🚛 .env updated for DriverApp:", content.trim());
-} catch (err) {
-  console.error("⚠️ Failed to update .env for DriverApp:", err.message);
-}
 app.listen(PORT, HOST, () => {
   console.log(`✅ MongoDB connected`);
   console.log(`🚚 Server running on http://${HOST}:${PORT}`);

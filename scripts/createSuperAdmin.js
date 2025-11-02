@@ -1,25 +1,22 @@
 // C:\Users\MMC\Desktop\truckinn-backend\scripts\createSuperAdmin.js
-// Usage:
-// 1) set MONGO_URI (see below) then run: node createSuperAdmin.js
-// 2) It will create or replace a user with role "super-admin"
+// Purpose: Upsert a Super Admin into the Admin collection (env-driven, no hardcoded URI)
 
+require("dotenv").config();
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 
-const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/truckinn"; // adjust if needed
+// IMPORTANT: server.js bhi MONGODB_URI use karta hai — yahin par bhi same env use hogi.
+const MONGO_URI = process.env.MONGODB_URI;
+if (!MONGO_URI) {
+  console.error("MONGODB_URI missing in environment.");
+  process.exit(1);
+}
 
-const userSchema = new mongoose.Schema({
-  name: String,
-  email: { type: String, unique: true },
-  password: String,
-  role: { type: String, default: "admin" },
-  createdAt: { type: Date, default: Date.now },
-});
-
-const User = mongoose.model("User", userSchema);
+// NOTE: Adjust the relative path if your Admin model lives elsewhere.
+const admin = require("../models/Admin"); // e.g. truckinn-backend/models/Admin.js
 
 async function upsertSuperAdmin({ email, plainPassword, name = "Super Admin" }) {
-  await mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+  await mongoose.connect(MONGO_URI);
 
   const saltRounds = 12;
   const hashed = await bcrypt.hash(plainPassword, saltRounds);
@@ -32,21 +29,28 @@ async function upsertSuperAdmin({ email, plainPassword, name = "Super Admin" }) 
     role: "super-admin",
     updatedAt: new Date(),
   };
-  const opts = { upsert: true, new: true, setDefaultsOnInsert: true };
+  const options = { upsert: true, new: true, setDefaultsOnInsert: true };
 
-  const result = await User.findOneAndUpdate(filter, update, opts).lean().exec();
-  console.log("Super admin upserted:", { email: result.email, role: result.role, id: result._id });
+  const doc = await Admin.findOneAndUpdate(filter, update, options).lean().exec();
+
+  console.log("✅ Super admin upserted:", {
+    id: doc._id,
+    email: doc.email,
+    role: doc.role,
+  });
+
   await mongoose.disconnect();
 }
 
 (async () => {
   try {
+    // TODO: change these once you login successfully
     const email = "arslan@truckinn.app";
-    const password = "123456789"; // TEMP PASSWORD — change immediately after login
+    const password = "ChangeMe@123"; // set a strong temp password
     await upsertSuperAdmin({ email, plainPassword: password, name: "Arslan (Super Admin)" });
-    console.log("Done. Login with the credentials and change password ASAP.");
+    console.log("Done. Please change the password after first login.");
   } catch (err) {
-    console.error("Error:", err);
+    console.error("Seed error:", err);
     process.exit(1);
   }
 })();
