@@ -77,6 +77,8 @@ router.post("/", async (req, res) => {
       type: "ride",
     });
 
+    const io = req.app.get("io");
+    io.emit("rideCreated", { rideId: newRide._id, shipperId });
 
     res.status(201).json({
      message: "Ride created successfully",
@@ -120,7 +122,7 @@ router.get("/shipper/:shipperId", async (req, res) => {
   }
 });
 
-/* ✅ Available rides (exact match: category + size) */
+/* ✅ Available rides (match: category + size + 30 km radius) */
 router.get("/available", async (req, res) => {
   try {
     const { driverId } = req.query;
@@ -128,26 +130,52 @@ router.get("/available", async (req, res) => {
       return res.status(400).json({ error: "driverId is required" });
     }
 
-    // 1️⃣ Validate driver
+    // 1️⃣ Validate driver + get latest location
     const driver = await Driver.findById(driverId);
     if (!driver) return res.status(404).json({ error: "Driver not found" });
 
-    // 2️⃣ Fetch rides that exactly match category & size
+    const { currentLat, currentLng } = driver;
+    if (currentLat == null || currentLng == null) {
+      return res.status(400).json({ error: "Driver location not available (please go online)" });
+    }
+
+    // helper: haversine distance (km)
+    const getDistanceKm = (lat1, lon1, lat2, lon2) => {
+      const R = 6371;
+      const dLat = ((lat2 - lat1) * Math.PI) / 180;
+      const dLon = ((lon2 - lon1) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos((lat1 * Math.PI) / 180) *
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    };
+
+    // 2️⃣ Fetch rides that match category & size
     const rides = await Ride.find({
       status: "Pending",
       vehicleCategory: driver.vehicleCategory,
-      vehicleSizeFeet: driver.vehicleSizeFeet, // 👈 exact size match only
+      vehicleSizeFeet: driver.vehicleSizeFeet,
     })
       .populate("shipperId", "name phone")
       .sort({ createdAt: -1 })
       .lean();
 
-    // 3️⃣ Driver’s own bids
+    // 3️⃣ Filter rides within 30 km radius of driver’s current location
+    const nearbyRides = rides.filter(r => {
+      const lat = r.pickupCoordinates?.lat;
+      const lng = r.pickupCoordinates?.lng;
+      if (typeof lat !== "number" || typeof lng !== "number") return false;
+      const dist = getDistanceKm(currentLat, currentLng, lat, lng);
+      return dist <= 30;
+    });
+
+    // 4️⃣ Mark driver’s own bids
     const driverBids = await DriverBid.find({ driver: driverId }).select("ride");
     const bidSet = new Set(driverBids.map(b => String(b.ride)));
 
-    // 4️⃣ Map formatted addresses
-    const formatted = rides.map(r => ({
+    const formatted = nearbyRides.map(r => ({
       ...r,
       pickupAddress: r.pickupLocation || r.pickupCoordinates?.address || "—",
       dropoffAddress: r.dropoffLocation || r.dropoffCoordinates?.address || "—",
@@ -155,9 +183,9 @@ router.get("/available", async (req, res) => {
       assignedDriverId: r.assignedDriver || null,
     }));
 
-    // 5️⃣ Only show rides not assigned to other drivers
+    // 5️⃣ Filter rides not assigned to others
     const filtered = formatted.filter(
-      (r) => !r.assignedDriverId || String(r.assignedDriverId) === String(driverId)
+      r => !r.assignedDriverId || String(r.assignedDriverId) === String(driverId)
     );
 
     res.json({
@@ -165,6 +193,8 @@ router.get("/available", async (req, res) => {
       sizeFeet: driver.vehicleSizeFeet,
       total: filtered.length,
       rides: filtered,
+      center: { lat: currentLat, lng: currentLng },
+      radiusKm: 30,
     });
   } catch (err) {
     console.error("Error fetching available rides:", err);
@@ -302,6 +332,12 @@ router.put("/:id/complete", async (req, res) => {
 
     await ride.save();
 
+    if (ride.assignedDriver) {
+      await Driver.findByIdAndUpdate(ride.assignedDriver, { isFrozen: false });
+    }
+    const io = req.app.get("io");
+    io.emit("rideCompleted", { rideId: ride._id, status: "Completed" });
+
     res.json({ message: "Ride marked as completed ✅", ride });
   } catch (err) {
     console.error("Error in ride completion:", err);
@@ -353,6 +389,8 @@ router.post("/:id/bid", async (req, res) => {
         type: "bid",
       });
     }
+    const io = req.app.get("io");
+    io.emit("newBid", { rideId, driverId, bidId: newBid._id });
 
     res.status(201).json({ message: "Bid submitted successfully", bid: newBid });
     } catch (err) {
@@ -411,10 +449,23 @@ router.put("/:rideId/bids/:bidId/accept", async (req, res) => {
     ride.status = "Accepted"; // can be changed to "Accepted" if needed
     await ride.save();
 
+    await Driver.findByIdAndUpdate(bid.driver._id, { isFrozen: true });
+
     // populate full driver info in response
     const updatedRide = await Ride.findById(rideId)
       .populate("assignedDriver")
       .lean();
+
+    const io = req.app.get("io");
+
+       // 🔹 Emit complete data for DriverApp realtime popup
+    io.emit("bidUpdated", {
+      rideId,
+      bidId,
+      status: "Accepted",
+      driverId: bid.driver._id,        // ✅ identify target driver
+      ride: updatedRide,               // ✅ full ride info for map navigation
+    });
 
     return res.json({
       message: "Bid accepted successfully",
@@ -449,6 +500,9 @@ router.put("/:rideId/bids/:bidId/reject", async (req, res) => {
     // Mark only this bid as Rejected
     bid.status = "Rejected";
     await bid.save();
+
+    const io = req.app.get("io");
+    io.emit("bidUpdated", { rideId, bidId, status: "Rejected" });
 
     // NOTE: Ride status intentionally unchanged (remains Pending)
     return res.json({ message: "Bid rejected successfully", bid });
@@ -604,6 +658,70 @@ router.post("/dev/fix-multi-accepted-bids", async (req, res) => {
   } catch (err) {
     console.error("Repair error:", err);
     return res.status(500).json({ error: err.message });
+  }
+});
+/* ✅ PATCH: update driver live location */
+router.patch("/:rideId/location", async (req, res) => {
+  try {
+    const { rideId } = req.params;
+    const { driverLat, driverLng } = req.body;
+
+    if (
+      typeof driverLat !== "number" ||
+      typeof driverLng !== "number" ||
+      isNaN(driverLat) ||
+      isNaN(driverLng)
+    ) {
+      return res.status(400).json({ error: "Valid driverLat and driverLng required" });
+    }
+
+    const ride = await Ride.findById(rideId);
+    if (!ride) {
+      return res.status(404).json({ error: "Ride not found" });
+    }
+
+    ride.driverLat = driverLat;
+    ride.driverLng = driverLng;
+    ride.lastLocationUpdate = new Date();
+    await ride.save();
+
+    res.json({
+      message: "Driver location updated successfully ✅",
+      driverLat: ride.driverLat,
+      driverLng: ride.driverLng,
+      lastLocationUpdate: ride.lastLocationUpdate,
+    });
+  } catch (err) {
+    console.error("Error updating driver location:", err);
+    res.status(500).json({ error: "Failed to update driver location" });
+  }
+});
+/* ✅ GET: fetch current driver live location */
+router.get("/:rideId/location", async (req, res) => {
+  try {
+    const { rideId } = req.params;
+
+    const ride = await Ride.findById(rideId).select("driverLat driverLng lastLocationUpdate assignedDriver status");
+    if (!ride) {
+      return res.status(404).json({ error: "Ride not found" });
+    }
+
+    // agar driver assigned ni hua to location meaningless
+    if (!ride.assignedDriver) {
+      return res.status(400).json({ error: "No driver assigned to this ride" });
+    }
+
+    res.json({
+      rideId,
+      assignedDriver: ride.assignedDriver,
+      driverLat: ride.driverLat,
+      driverLng: ride.driverLng,
+      lastLocationUpdate: ride.lastLocationUpdate,
+      status: ride.status,
+    });
+  } catch (err) {
+    console.error("Error fetching driver location:", err);
+    res.status(500).json({ error: "Failed to fetch driver location" });
   }
 });
 

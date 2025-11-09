@@ -99,5 +99,21 @@ const rideSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+// 🔹 Driver live tracking fields
+rideSchema.add({
+  driverLat: {
+    type: Number,
+    default: null,
+  },
+  driverLng: {
+    type: Number,
+    default: null,
+  },
+  lastLocationUpdate: {
+    type: Date,
+    default: null,
+  },
+});
+
 
 module.exports = mongoose.model("Ride", rideSchema);

@@ -458,9 +458,10 @@ router.get("/by-vendor/:vendor", async (req, res, next) => {
      const fullName = `${driver.firstName ?? ""} ${driver.lastName ?? ""}`.trim() || "Driver";
      return res.json({
        ...driver.toObject(),
-       name: fullName,             // front-end Drawer ke liye
-       rating: averageRating,      // front-end Drawer ke liye
-       reviews: ratings.length,    // front-end Drawer ke liye
+       name: fullName,
+       rating: averageRating,
+       reviews: ratings.length,
+       isFrozen: driver.isFrozen || false,
      });
    } catch (err) {
      return res.status(500).json({ error: err.message });
@@ -494,6 +495,59 @@ router.get("/:driverId/completed", async (req, res) => {
   } catch (err) {
     console.error("Error fetching completed rides:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+/* ✅ PATCH: update driver live location */
+router.patch("/:driverId/location", async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    const { lat, lng, accuracy, speed, heading } = req.body;
+
+    // basic validation
+    if (
+      typeof lat !== "number" ||
+      typeof lng !== "number" ||
+      isNaN(lat) ||
+      isNaN(lng)
+    ) {
+      return res.status(400).json({ error: "Valid lat & lng required" });
+    }
+
+    const driver = await Driver.findById(driverId);
+    if (!driver) {
+      return res.status(404).json({ error: "Driver not found" });
+    }
+
+    driver.currentLat = lat;
+    driver.currentLng = lng;
+    driver.lastLocationUpdate = new Date();
+    await driver.save();
+
+    try {
+      const io = req.app.get("io");  // ✅ get socket instance from Express
+       io.emit("driverLocationUpdate", {
+       driverId,
+       lat: driver.currentLat,
+       lng: driver.currentLng,
+       lastLocationUpdate: driver.lastLocationUpdate,
+      });
+     console.log("📡 Emitted driverLocationUpdate:", driverId, driver.currentLat, driver.currentLng);
+      } catch (socketErr) {
+     console.error("⚠️ Socket emit failed:", socketErr.message);
+    }
+
+
+    res.json({
+      message: "Driver live location updated ✅",
+      driverId,
+      currentLat: driver.currentLat,
+      currentLng: driver.currentLng,
+      lastLocationUpdate: driver.lastLocationUpdate,
+    });
+  } catch (err) {
+    console.error("❌ Error updating driver location:", err);
+    res.status(500).json({ error: "Failed to update driver location" });
   }
 });
 

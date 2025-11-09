@@ -81,26 +81,54 @@ app.use((err, req, res, next) => {
   return res.status(500).json({ error: "Internal Server Error" });
 });
 
-// ✅ Start Server (auto-detect correct local IP)
-const os = require("os");
+// ✅ Helper to get Wi-Fi / LAN IP only
 function getLocalIP() {
-  const nets = os.networkInterfaces();
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name]) {
+  const os = require("os");
+  const interfaces = os.networkInterfaces();
+
+  for (const name in interfaces) {
+    for (const iface of interfaces[name]) {
+      // Skip internal & Docker/VPN addresses
       if (
-        net.family === "IPv4" &&
-        !net.internal &&
-        net.address.startsWith("192.168.")
+        iface.family === "IPv4" &&
+        !iface.internal &&
+        !iface.address.startsWith("172.") &&  // skip Docker/WireGuard
+        !iface.address.startsWith("169.")     // skip link-local
       ) {
-        return net.address;
+        return iface.address; // e.g. 192.168.x.x
       }
     }
   }
   return "0.0.0.0"; // fallback
 }
 
+
+// ✅ Start Server (with Socket.io)
+const http = require("http");
+const { Server } = require("socket.io");
+
+const server = http.createServer(app);
 const PORT = process.env.PORT || 4000;
 const HOST = getLocalIP();
+
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST", "PATCH"],
+  },
+});
+app.set("io", io);
+
+// 🔹 When client connects
+io.on("connection", (socket) => {
+  console.log("🔌 Socket connected:", socket.id);
+
+  socket.on("disconnect", () => {
+    console.log("❌ Socket disconnected:", socket.id);
+  });
+});
+
+module.exports.io = io;
 
 // ✅ Auto-update UserApp .env with current IP
 const envFile = path.join(__dirname, "../TruckInn/UserApp/.env");
@@ -111,6 +139,7 @@ try {
 } catch (err) {
   console.error("⚠️ Failed to update .env for UserApp:", err.message);
 }
+
 // ✅ Also update DriverApp .env with same IP
 const driverEnvFile = path.join(__dirname, "../TruckInn/DriverApp/.env");
 try {
@@ -120,7 +149,9 @@ try {
 } catch (err) {
   console.error("⚠️ Failed to update .env for DriverApp:", err.message);
 }
-app.listen(PORT, HOST, () => {
-  console.log(`✅ MongoDB connected`);
-  console.log(`🚚 Server running on http://${HOST}:${PORT}`);
+
+// ✅ Start Express + Socket.io
+server.listen(PORT, HOST, () => {
+  console.log(`🚚 Server + Socket.io running on http://${HOST}:${PORT}`);
 });
+

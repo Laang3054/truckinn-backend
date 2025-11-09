@@ -80,4 +80,12 @@ const driverSchema = new mongoose.Schema(
 driverSchema.index({ vendorName: 1 });
 driverSchema.index({ vendorName: 1, vehicleCategory: 1 });
 
+driverSchema.add({
+  currentLat: { type: Number, default: null },
+  currentLng: { type: Number, default: null },
+  lastLocationUpdate: { type: Date, default: null },
+  isFrozen: { type: Boolean, default: false },
+});
+
+
 module.exports = mongoose.model("Driver", driverSchema);
