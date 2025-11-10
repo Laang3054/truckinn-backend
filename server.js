@@ -54,6 +54,7 @@ app.use("/api/ratings", ratingRoutes);
 app.use("/api/vehicles", vehicleRoutes);
 app.use("/api/earnings", earningsRoutes);
 app.use("/api/dev", require("./routes/devRoutes"));
+app.use("/api/maps", require("./routes/mapsRoutes"));
 
 
 // ✅ Health Check
